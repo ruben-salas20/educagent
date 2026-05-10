@@ -37,7 +37,7 @@ export class SqliteAttemptRepository implements IAttemptRepository {
   private readonly selectByIdStmt: Database.Statement;
   private readonly selectBySessionStmt: Database.Statement;
 
-  constructor(private readonly db: Database.Database) {
+  constructor(db: Database.Database) {
     this.insertStmt = db.prepare(INSERT_SQL);
     this.selectByIdStmt = db.prepare(SELECT_BY_ID_SQL);
     this.selectBySessionStmt = db.prepare(SELECT_BY_SESSION_SQL);
