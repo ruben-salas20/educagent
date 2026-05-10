@@ -7,11 +7,14 @@
 // Si falla la apertura de DB o las migraciones, throw CompositionRootError —
 // la app no puede arrancar sin DB lista.
 
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { IAttemptRepository } from '../ports/persistence/IAttemptRepository.js';
 import type { IMasteryStateRepository } from '../ports/persistence/IMasteryStateRepository.js';
 import type { IScheduler } from '../ports/inference/IScheduler.js';
 import type { IClock } from '../ports/infra/IClock.js';
+import type { UserConfig } from '../ports/infra/IConfigStore.js';
 import {
   openConnection,
   type ConnectionConfig,
@@ -32,6 +35,12 @@ export interface AppContainer {
   readonly scheduler: IScheduler;
   readonly clock: IClock;
   /**
+   * Config del usuario expuesto para que use cases consulten preferences
+   * (idioma, retentionLevel, domain). Inmutable durante el ciclo de vida
+   * del container — si el usuario edita el TOML, hay que rebuild.
+   */
+  readonly userConfig: UserConfig;
+  /**
    * Acceso directo a la DB. Expuesto porque los tests integration necesitan
    * insertar fixtures de FK (projects, sessions, items, concepts) antes de
    * ejercitar use cases. Producción NO debería tocar este handle directamente —
@@ -41,8 +50,23 @@ export interface AppContainer {
 }
 
 export interface BuildContainerConfig {
-  /** SQLite path. ':memory:' para tests, ruta absoluta o relativa para uso real. */
-  readonly sqliteFilename: string;
+  /**
+   * Config del usuario (de ~/.educagent/config.toml). Para tests con DB en memoria,
+   * pasar un UserConfig dummy con cualquier perfil — no afecta SQLite cuando
+   * sqliteFilename override es ':memory:'.
+   */
+  readonly userConfig: UserConfig;
+  /**
+   * Override del SQLite path. Default: derivado del config dir (ver buildContainer).
+   * Para tests integration usar ':memory:'.
+   */
+  readonly sqliteFilename?: string;
+  /**
+   * Override del directorio donde vive el config (default: ~/.educagent). Solo
+   * afecta el default de sqliteFilename — el config en sí ya fue leído antes
+   * de este builder.
+   */
+  readonly configDir?: string;
   /**
    * Si true, no aplica WAL. `:memory:` lo desactiva automáticamente.
    * Útil para entornos donde WAL no aplica (tests, ramdisk, etc.).
@@ -73,8 +97,10 @@ export class CompositionRootError extends Error {
  * Si falla la apertura o las migraciones, throw CompositionRootError.
  */
 export function buildContainer(config: BuildContainerConfig): AppContainer {
+  const sqliteFilename = resolveSqliteFilename(config);
+
   const connConfig: ConnectionConfig = {
-    filename: config.sqliteFilename,
+    filename: sqliteFilename,
     disableWAL: config.disableWAL,
   };
 
@@ -83,7 +109,7 @@ export function buildContainer(config: BuildContainerConfig): AppContainer {
     db = openConnection(connConfig);
   } catch (e) {
     throw new CompositionRootError(
-      `Failed to open SQLite connection at '${config.sqliteFilename}': ${
+      `Failed to open SQLite connection at '${sqliteFilename}': ${
         e instanceof Error ? e.message : String(e)
       }`,
       e,
@@ -110,5 +136,19 @@ export function buildContainer(config: BuildContainerConfig): AppContainer {
     masteryStates: new SqliteMasteryStateRepository(db),
     scheduler: new Sm2Scheduler(),
     clock: new SystemClock(),
+    userConfig: config.userConfig,
   };
+}
+
+/**
+ * Resuelve el path final del SQLite según prioridad:
+ *   1. config.sqliteFilename explícito (típico en tests: ':memory:').
+ *   2. configDir + 'educagent.sqlite'.
+ *   3. ~/.educagent/educagent.sqlite (default productivo).
+ */
+function resolveSqliteFilename(config: BuildContainerConfig): string {
+  if (config.sqliteFilename !== undefined) return config.sqliteFilename;
+
+  const baseDir = config.configDir ?? join(homedir(), '.educagent');
+  return join(baseDir, 'educagent.sqlite');
 }

@@ -76,7 +76,17 @@ describe('SubmitAttempt — integration full-stack contra SQLite :memory:', () =
   let container: AppContainer;
 
   beforeEach(() => {
-    container = buildContainer({ sqliteFilename: ':memory:' });
+    container = buildContainer({
+      userConfig: {
+        schemaVersion: 1,
+        profile: {
+          domain: 'programming',
+          agentLanguage: 'auto',
+          retentionLevel: 'strict',
+        },
+      },
+      sqliteFilename: ':memory:',
+    });
     seedFixtures(container);
   });
 

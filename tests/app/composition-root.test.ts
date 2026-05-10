@@ -3,6 +3,9 @@
 // correcto, aplica migraciones y mantiene aislamiento entre llamadas.
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildContainer,
   CompositionRootError,
@@ -11,10 +14,23 @@ import { SqliteAttemptRepository } from '../../src/adapters/persistence/sqlite/S
 import { SqliteMasteryStateRepository } from '../../src/adapters/persistence/sqlite/SqliteMasteryStateRepository.js';
 import { Sm2Scheduler } from '../../src/adapters/inference/Sm2Scheduler.js';
 import { SystemClock } from '../../src/adapters/infra/SystemClock.js';
+import type { UserConfig } from '../../src/ports/infra/IConfigStore.js';
+
+const dummyUserConfig: UserConfig = {
+  schemaVersion: 1,
+  profile: {
+    domain: 'programming',
+    agentLanguage: 'auto',
+    retentionLevel: 'strict',
+  },
+};
 
 describe('buildContainer', () => {
-  it('retorna container con las 4 dependencies + db handle', () => {
-    const container = buildContainer({ sqliteFilename: ':memory:' });
+  it('retorna container con las 4 dependencies + db + userConfig', () => {
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
     try {
       expect(container.attempts).toBeInstanceOf(SqliteAttemptRepository);
       expect(container.masteryStates).toBeInstanceOf(SqliteMasteryStateRepository);
@@ -22,13 +38,17 @@ describe('buildContainer', () => {
       expect(container.clock).toBeInstanceOf(SystemClock);
       expect(container.db).toBeDefined();
       expect(container.db.open).toBe(true);
+      expect(container.userConfig).toEqual(dummyUserConfig);
     } finally {
       container.db.close();
     }
   });
 
   it('aplica migrations al arrancar (schema queda listo)', () => {
-    const container = buildContainer({ sqliteFilename: ':memory:' });
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
     try {
       const row = container.db
         .prepare(
@@ -43,7 +63,10 @@ describe('buildContainer', () => {
   });
 
   it('aplica migrations y registra entries en _migrations', () => {
-    const container = buildContainer({ sqliteFilename: ':memory:' });
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
     try {
       const row = container.db
         .prepare(`SELECT count(*) as c FROM _migrations`)
@@ -55,7 +78,10 @@ describe('buildContainer', () => {
   });
 
   it('PRAGMA foreign_keys queda ON tras buildContainer', () => {
-    const container = buildContainer({ sqliteFilename: ':memory:' });
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
     try {
       const row = container.db.pragma('foreign_keys', { simple: true });
       expect(row).toBe(1);
@@ -65,8 +91,14 @@ describe('buildContainer', () => {
   });
 
   it('múltiples llamadas con :memory: crean DBs independientes', () => {
-    const c1 = buildContainer({ sqliteFilename: ':memory:' });
-    const c2 = buildContainer({ sqliteFilename: ':memory:' });
+    const c1 = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
+    const c2 = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
     try {
       expect(c1.db).not.toBe(c2.db);
       // Inserción en c1 no debe ser visible en c2
@@ -83,6 +115,40 @@ describe('buildContainer', () => {
     } finally {
       c1.db.close();
       c2.db.close();
+    }
+  });
+
+  it('preserva userConfig en el container (referencia exacta)', () => {
+    const customConfig: UserConfig = {
+      schemaVersion: 1,
+      profile: { domain: 'math', agentLanguage: 'es', retentionLevel: 'full' },
+    };
+    const container = buildContainer({
+      userConfig: customConfig,
+      sqliteFilename: ':memory:',
+    });
+    try {
+      expect(container.userConfig).toBe(customConfig);
+    } finally {
+      container.db.close();
+    }
+  });
+
+  it('deriva sqliteFilename del configDir si no se pasa override', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'educagent-compo-'));
+    try {
+      const container = buildContainer({
+        userConfig: dummyUserConfig,
+        configDir: tmp,
+      });
+      try {
+        const expectedPath = join(tmp, 'educagent.sqlite');
+        expect(existsSync(expectedPath)).toBe(true);
+      } finally {
+        container.db.close();
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 
