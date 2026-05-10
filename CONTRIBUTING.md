@@ -149,7 +149,7 @@ Template breve:
 
 ## Código de conducta
 
-Este proyecto adhiere al [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Reportes de comportamiento inaceptable a rubensalas0907@gmail.com.
+Este proyecto adhiere al [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Reportes de comportamiento inaceptable a rubend.salasp@uqvirtual.edu.co.
 
 ---
 

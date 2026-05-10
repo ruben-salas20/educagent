@@ -96,7 +96,7 @@ Detalle completo y fuera-de-scope explícito en [`docs/PRD.md`](docs/PRD.md), se
 
 ```bash
 # Instalación (cuando el primer release v0.1.0 esté publicado)
-pnpm install -g educagent
+pnpm install -g @educagent/cli
 
 # Inicio en un directorio con material de estudio
 cd ~/estudios/mi-curso
