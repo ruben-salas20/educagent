@@ -8,7 +8,7 @@ export default defineConfig({
     poolOptions: {
       threads: { singleThread: false, isolate: true },
     },
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['node_modules', 'dist'],
     coverage: {
       provider: 'v8',
