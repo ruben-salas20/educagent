@@ -27,8 +27,7 @@ async function main(): Promise<number> {
 
   switch (command) {
     case 'init':
-      await runInit();
-      return 0;
+      return runInit();
     case '--version':
     case '-v':
       console.log(readPackageVersion());
