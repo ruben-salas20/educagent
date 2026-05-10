@@ -36,6 +36,8 @@ export type ConfidenceTier = 'primary' | 'secondary' | 'tertiary';
 
 > **Por qué `paramsHash`**: cuando FSRS recalibre params (Mes 5), todos los `SchedulingState` con `paramsHash` viejo deben re-derivarse desde Attempts. Sin el hash, no hay forma de saber qué state está stale. Para SM-2 el hash es constante (mismo algoritmo, mismos defaults).
 
+> **Dónde viven los tipos `SchedulingState` / `SchedulerError` / `SchedulingParams` / `CalibrationError`** *(refactor aplicado durante implementación de P7)*: los tipos viven en `src/core/value-objects/SchedulingState.ts`, NO dentro de `IScheduler.ts`. Razón: `MasteryState` (entity en `core/`) necesita importar `SchedulingState`, y la regla de boundaries `core → core` lo prohíbe si vive en `ports/`. Es Dependency Inversion aplicado: los tipos son del **dominio**, no del **port**; el port los **usa** y los **re-exporta** por conveniencia. Los consumidores (`Sm2Scheduler`, casos de uso) siguen importándolos desde `ports/inference/IScheduler.js` sin saber del re-export. El bloque `ts` de abajo refleja la API pública del port.
+
 ```ts
 // src/ports/inference/IScheduler.ts
 import type { Result } from '../../core/result/Result';
