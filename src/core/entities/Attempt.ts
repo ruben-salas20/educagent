@@ -7,17 +7,11 @@
 
 import type { Mode } from '../value-objects/Mode.js';
 import type { Outcome } from '../value-objects/Outcome.js';
+import type { ErrorType } from '../value-objects/ErrorType.js';
 
-/**
- * Taxonomía de error observada. Coincide con el CHECK constraint de attempts.error_type.
- */
-export type ErrorType =
-  | 'conceptual'
-  | 'procedural'
-  | 'notational'
-  | 'careless'
-  | 'off-topic'
-  | 'partial-correct';
+// Re-export para preservar API pública: consumidores existentes pueden seguir
+// haciendo `import { ErrorType } from '.../Attempt.js'`.
+export type { ErrorType } from '../value-objects/ErrorType.js';
 
 export interface Attempt {
   readonly id: string;
