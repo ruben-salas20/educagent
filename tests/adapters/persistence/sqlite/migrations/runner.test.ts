@@ -95,7 +95,7 @@ describe('applyMigrations', () => {
     db.close();
   });
 
-  it('cuenta total: 16 tablas de dominio + _migrations + _privacy_purges + 1 view', () => {
+  it('cuenta total: 21 tablas (12 dominio + 6 M:N + _migrations + _privacy_purges + 1 affective_aggregates) + 1 view', () => {
     const db = openConnection({ filename: ':memory:' });
     applyMigrations(db);
 
@@ -104,8 +104,18 @@ describe('applyMigrations', () => {
         c: number;
       }
     ).c;
-    // 16 dominio + _migrations + _privacy_purges = 18
-    expect(tableCount).toBe(18);
+    // Tablas de dominio principales (13):
+    //   projects, knowledge_sources, curriculums, curriculum_nodes,
+    //   concepts, items, sessions, attempts, mastery_states,
+    //   metacognitive_signals, affective_logs, affective_aggregates,
+    //   source_attribution_logs
+    // Tablas M:N (6):
+    //   curriculum_node_prereqs, concept_node_links, concept_source_anchors,
+    //   item_concepts, item_sources, source_attribution_refs
+    // Tablas de infraestructura (2):
+    //   _migrations, _privacy_purges
+    // Total: 21 tablas + 1 view (item_bank_pool, contado aparte abajo).
+    expect(tableCount).toBe(21);
 
     const viewCount = (
       db.prepare(`SELECT count(*) as c FROM sqlite_master WHERE type='view'`).get() as {
