@@ -4,6 +4,9 @@
 .opencode/
 memory/
 
+# Backups operacionales (incidentes locales, no parte del proyecto)
+.user-path-backup.txt
+
 # Node / pnpm
 node_modules/
 .pnpm-store/
