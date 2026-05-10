@@ -1,5 +1,6 @@
-# Claude Code / agentes locales
-.claude/
+# Claude Code / agentes locales — excluido excepto agents/ compartidos
+.claude/*
+!.claude/agents/
 .opencode/
 memory/
 
