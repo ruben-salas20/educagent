@@ -270,8 +270,8 @@ describe('P6 — Lenguaje atribucional Weiner', () => {
       strategy: 'descomposición',
       language: 'es'
     });
-    expect(phrase).toMatch(/estrategia.+funcionó/i);
-    expect(phrase).not.toMatch(/inteligente/i);
+    expect(phrase.text).toMatch(/estrategia.+funcionó/i);
+    expect(phrase.text).not.toMatch(/inteligente/i);
   });
 
   it('frente a error, atribuye a estrategia inaplicable, no a capacidad', () => {
@@ -281,10 +281,14 @@ describe('P6 — Lenguaje atribucional Weiner', () => {
       strategy: 'memorización',
       language: 'es'
     });
-    expect(phrase).toMatch(/esa estrategia no aplica/i);
-    expect(phrase).not.toMatch(/no sos bueno/i);
+    expect(phrase.text).toMatch(/esa estrategia no aplica/i);
+    expect(phrase.text).not.toMatch(/no sos bueno/i);
   });
 });
+
+// Nota: `buildAttribution` retorna `AttributionResult` con campos `{ text, attributedTo, language }`.
+// El campo `attributedTo` permite auditoría del lenguaje atribucional Weiner — útil para que P5
+// (captura metacognitiva) razone sobre cómo el agente está hablando con el usuario.
 ```
 
 ### P7 — Calibración 85% y selección
