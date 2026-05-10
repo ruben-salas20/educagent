@@ -14,8 +14,26 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       include: ['src/**/*.ts'],
-      exclude: ['src/cli/**', 'src/**/index.ts', 'src/adapters/llm/**'],
-      // thresholds desactivados hasta tener 3+ políticas implementadas (walking skeleton)
+      exclude: [
+        'src/cli/**',
+        'src/**/index.ts',
+        'src/adapters/llm/**',
+        // Entities y value-objects son type-only: sin runtime code, coverage 0% es esperable
+        'src/core/entities/**',
+        'src/core/value-objects/**',
+        // ports son interfaces puras
+        'src/ports/**',
+      ],
+      thresholds: {
+        // Activados con 5 políticas + Sm2Scheduler + persistence layer.
+        // 75/75/75/70 cubre el coverage actual con margen. Subir a 80 cuando P3
+        // tenga las ramas faltantes cubiertas (handleInsistence tier=tertiary
+        // + fallback sanitizeOutput).
+        lines: 75,
+        statements: 75,
+        functions: 75,
+        branches: 70,
+      },
     },
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 5000,
