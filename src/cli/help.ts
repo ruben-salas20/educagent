@@ -7,6 +7,7 @@ export function printHelp(): void {
   console.log('');
   console.log('Comandos:');
   console.log('  init       Inicializar EducAgent en el directorio actual');
+  console.log('  learn      Iniciar una sesión de aprendizaje (walking skeleton)');
   console.log('');
   console.log('Opciones:');
   console.log('  -v, --version    Mostrar versión');

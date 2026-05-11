@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { runInit } from './commands/init.js';
+import { runLearn } from './commands/learn.js';
 import { printHelp } from './help.js';
 
 /**
@@ -28,6 +29,8 @@ async function main(): Promise<number> {
   switch (command) {
     case 'init':
       return runInit();
+    case 'learn':
+      return runLearn();
     case '--version':
     case '-v':
       console.log(readPackageVersion());
