@@ -17,7 +17,6 @@ export default defineConfig({
       exclude: [
         'src/cli/**',
         'src/**/index.ts',
-        'src/adapters/llm/**',
         // Entities y value-objects son type-only: sin runtime code, coverage 0% es esperable
         'src/core/entities/**',
         'src/core/value-objects/**',
