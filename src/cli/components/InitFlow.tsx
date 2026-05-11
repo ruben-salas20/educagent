@@ -24,6 +24,29 @@ import {
   type OllamaCatalogError,
 } from '../lib/ollamaCatalog.js';
 
+/**
+ * Wrapper sobre SelectInput que demora el mount real ~80ms.
+ * Razón: ink-select-input v6 pierde los primeros keypresses cuando se monta
+ * inmediatamente después de una transición de step asincrónica (el setup de raw
+ * mode de stdin no está listo). Con un delay corto, raw mode se estabiliza
+ * antes de que el SelectInput intente subscribirse al stdin.
+ * Imperceptible visualmente para el usuario.
+ */
+function StableSelectInput<V>(props: {
+  items: ReadonlyArray<{ key?: string; label: string; value: V }>;
+  onSelect: (item: { label: string; value: V }) => void;
+}): React.JSX.Element {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 80);
+    return () => clearTimeout(t);
+  }, []);
+  if (!ready) {
+    return <Text dimColor> </Text>;
+  }
+  return <SelectInput items={[...props.items]} onSelect={props.onSelect} />;
+}
+
 type Step =
   | 'welcome'
   | 'domain'
@@ -350,7 +373,7 @@ export function InitFlow({
         <Box marginBottom={1}>
           <Text bold>Elegí el modelo Ollama</Text>
         </Box>
-        <SelectInput
+        <StableSelectInput
           items={items}
           onSelect={(item) => {
             setModel(item.value);
@@ -376,8 +399,8 @@ export function InitFlow({
           </Text>
         ))}
         <Box marginTop={1}>
-          <SelectInput
-            items={[...OLLAMA_ERROR_ITEMS]}
+          <StableSelectInput
+            items={OLLAMA_ERROR_ITEMS}
             onSelect={(item) => {
               if (item.value === 'retry') {
                 setStep('llm_ollama_loading');
@@ -411,8 +434,8 @@ export function InitFlow({
             `educagent learn`.
           </Text>
         </Box>
-        <SelectInput
-          items={[...ANTHROPIC_MODEL_ITEMS]}
+        <StableSelectInput
+          items={ANTHROPIC_MODEL_ITEMS}
           onSelect={(item) => {
             setModel(item.value);
             setStep('summary');

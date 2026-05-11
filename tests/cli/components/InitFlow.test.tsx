@@ -177,8 +177,11 @@ describe('InitFlow — Ink component', () => {
     await delay(300);
     stdin.write(ENTER);
     await waitFor(lastFrame, 'Elegí el modelo Anthropic');
-    expect(lastFrame()).toContain('Sonnet');
     expect(lastFrame()).toContain('ANTHROPIC_API_KEY');
+    // StableSelectInput tiene un delay 80ms antes de renderizar items reales —
+    // esperar a que aparezca el primer item.
+    await waitFor(lastFrame, 'Sonnet');
+    expect(lastFrame()).toContain('Sonnet');
 
     // Seleccionar sonnet (primer item) → summary.
     stdin.write(ENTER);
