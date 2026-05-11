@@ -2,36 +2,32 @@
 // Comando `educagent learn` — walking skeleton MVP one-shot.
 //
 // Flow:
-//   1. Leer ANTHROPIC_API_KEY del env (BYOK). Sin key, abort con hint claro —
-//      el espíritu del producto es "agente que entiende", NO heurísticas placebo.
-//   2. Construir AnthropicLLMProvider y bootstrappear container con el LLM.
-//   3. Seed mínimo idempotente (project/concept/item/session) para satisfacer FKs.
+//   1. Factory selector: EDUCAGENT_LLM_PROVIDER (default: ollama).
+//      - 'ollama' → OllamaLLMProvider (local, no requiere API key).
+//      - 'anthropic' → AnthropicLLMProvider (requiere ANTHROPIC_API_KEY).
+//   2. Bootstrappear container con el LLM inyectado.
+//   3. Seed mínimo idempotente (project/concept/item/session) para FKs.
 //   4. Render LearnFlow → usuario responde la pregunta hardcoded.
 //   5. analyzeAttempt() invoca al LLM para clasificar outcome + errorType.
-//   6. submitAttempt() persiste el Attempt + actualiza MasteryState + P1 feedback.
+//   6. submitAttempt() persiste Attempt + actualiza MasteryState + P1 feedback.
 //   7. Render del feedbackDecision (o "Registrado." si no hay).
-//
-// TODO loop: hoy es ONE-SHOT. El learn real va a tener loop con SelectNextItem,
-// múltiples concepts, manejo de fatigue, off-ramps, etc.
 
 import React from 'react';
 import { render } from 'ink';
 import { TomlConfigStore } from '../../adapters/infra/TomlConfigStore.js';
 import { AnthropicLLMProvider } from '../../adapters/llm/AnthropicLLMProvider.js';
+import { OllamaLLMProvider } from '../../adapters/llm/OllamaLLMProvider.js';
 import { bootstrap } from '../../app/bootstrap.js';
 import { analyzeAttempt } from '../../app/use-cases/AnalyzeAttempt.js';
 import { submitAttempt } from '../../app/use-cases/SubmitAttempt.js';
 import { LearnFlow, type LearnFlowSubmitResult } from '../components/LearnFlow.js';
 import type { AppContainer } from '../../app/composition-root.js';
 import type { Attempt } from '../../core/entities/Attempt.js';
+import type { ILLMProvider } from '../../ports/llm/ILLMProvider.js';
 
-// IDs hardcoded para el seed mínimo del MVP. Cuando agreguemos repos de Project/
-// Concept/Item/Session, este seed va a estar en su use case propio
-// (ej: IngestKnowledgeSource o CreateProject).
+// IDs hardcoded para el seed mínimo del MVP.
 const SEED_PROJECT_ID = 'prj_default';
 const SEED_CONCEPT_ID = 'concept_variable';
-// IMPORTANTE: item.id === concept.id. SubmitAttempt asume itemId === conceptId
-// (ver TODO en SubmitAttempt.ts L198-200) hasta que exista item→concept lookup.
 const SEED_ITEM_ID = SEED_CONCEPT_ID;
 const SEED_SESSION_ID = 'sess_mvp_default';
 
@@ -40,35 +36,71 @@ const SEED_ITEM_PROMPT =
 const SEED_CONCEPT_NAME = 'Variable en programación';
 const ASSUMED_LATENCY_MS = 30_000;
 
-// Default fijo a un modelo dated (estable, no se mueve solo). El usuario puede
-// override con ANTHROPIC_MODEL si quiere experimentar con otro alias/versión.
-const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_OLLAMA_MODEL = 'gemma4:latest';
+const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
+
+type ProviderBuildResult =
+  | { ok: true; provider: ILLMProvider }
+  | { ok: false; error: string };
+
+/**
+ * Factory selector. Lee env vars y devuelve el LLMProvider configurado.
+ * Default: Ollama (local-first, sin API key requerida).
+ */
+function buildLLMProvider(): ProviderBuildResult {
+  const choice = (process.env.EDUCAGENT_LLM_PROVIDER ?? 'ollama').toLowerCase();
+
+  if (choice === 'ollama') {
+    const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+    const baseUrl = process.env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL;
+    return {
+      ok: true,
+      provider: new OllamaLLMProvider({ model, baseUrl }),
+    };
+  }
+
+  if (choice === 'anthropic') {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || apiKey.trim() === '') {
+      return {
+        ok: false,
+        error: [
+          'EDUCAGENT_LLM_PROVIDER=anthropic pero no se encontró ANTHROPIC_API_KEY.',
+          '',
+          'Configurala así:',
+          '  PowerShell:  $env:ANTHROPIC_API_KEY = "tu-key"',
+          '  Bash:        export ANTHROPIC_API_KEY="tu-key"',
+          '',
+          `Modelo opcional via ANTHROPIC_MODEL (default: ${DEFAULT_ANTHROPIC_MODEL}).`,
+        ].join('\n'),
+      };
+    }
+    const model = process.env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
+    return {
+      ok: true,
+      provider: new AnthropicLLMProvider({ apiKey, model }),
+    };
+  }
+
+  return {
+    ok: false,
+    error: `EDUCAGENT_LLM_PROVIDER='${choice}' no es válido. Opciones: ollama, anthropic.`,
+  };
+}
 
 /**
  * Entry point del comando `educagent learn`.
- * @returns exit code (0 ok, 1 fallo de bootstrap o falta de API key)
+ * @returns exit code (0 ok, 1 fallo de bootstrap o configuración inválida)
  */
 export async function runLearn(): Promise<number> {
-  // 1. BYOK: leer API key del environment. Sin key, no arrancamos.
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey.trim() === '') {
-    console.error('Error: no se encontró ANTHROPIC_API_KEY en el environment.');
-    console.error('');
-    console.error('EducAgent es BYOK (Bring Your Own Key): necesitás tu propia');
-    console.error('clave de Anthropic para que el agente analice tus respuestas.');
-    console.error('');
-    console.error('Configurala así:');
-    console.error('  PowerShell:  $env:ANTHROPIC_API_KEY = "tu-key"');
-    console.error('  Bash:        export ANTHROPIC_API_KEY="tu-key"');
-    console.error('');
-    console.error('Para que persista, agregala a tu PowerShell profile / .bashrc.');
-    console.error('');
-    console.error('Modelo opcional via ANTHROPIC_MODEL (default: ' + DEFAULT_MODEL + ').');
+  // 1. Factory: armar el LLMProvider según env vars.
+  const providerResult = buildLLMProvider();
+  if (!providerResult.ok) {
+    console.error('Error:', providerResult.error);
     return 1;
   }
-
-  const model = process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL;
-  const llm = new AnthropicLLMProvider({ apiKey, model });
+  const llm = providerResult.provider;
 
   // 2. Bootstrap del container con el LLM inyectado.
   const store = new TomlConfigStore();
@@ -89,14 +121,10 @@ export async function runLearn(): Promise<number> {
   const handleSubmit = async (
     responseText: string,
   ): Promise<LearnFlowSubmitResult> => {
-    // Defensa: en runLearn siempre inyectamos un LLM, pero el container.llm
-    // puede ser null si alguien llama buildContainer sin pasarlo. Mantenemos
-    // el check explícito para que el contrato sea claro.
     if (!container.llm) {
       return { ok: false, error: 'LLM no disponible.' };
     }
 
-    // 3. Analyze: el LLM clasifica outcome + errorType.
     const analysis = await analyzeAttempt(
       {
         itemPrompt: SEED_ITEM_PROMPT,
@@ -116,7 +144,6 @@ export async function runLearn(): Promise<number> {
 
     const { outcome, errorType } = analysis.value;
 
-    // 4. Submit: persistir Attempt + actualizar MasteryState + decidir feedback.
     const now = Date.now();
     const attempt: Attempt = {
       id: `att_${now}_${Math.random().toString(36).slice(2, 8)}`,
@@ -128,10 +155,10 @@ export async function runLearn(): Promise<number> {
       submittedAt: new Date(now).toISOString(),
       latencyMs: ASSUMED_LATENCY_MS,
       responseText,
-      outcome, // ← LLM-detected
+      outcome,
       scaffoldLevelReached: 0,
       scaffoldRequestedBy: null,
-      errorType, // ← LLM-detected
+      errorType,
       preConfidence: null,
       postConfidence: null,
       retryCount: 0,
@@ -142,7 +169,7 @@ export async function runLearn(): Promise<number> {
       {
         attempt,
         conceptName: SEED_CONCEPT_NAME,
-        sourceTier: 'tertiary', // sin RAG activo todavía
+        sourceTier: 'tertiary',
       },
       container,
     );
@@ -151,7 +178,6 @@ export async function runLearn(): Promise<number> {
       return { ok: false, error: JSON.stringify(result.error) };
     }
 
-    // feedbackDecision === null cuando no hay errorType → caso 'correct' sin feedback.
     const feedbackText = result.value.feedbackDecision?.text ?? 'Registrado.';
     return { ok: true, feedbackText };
   };
@@ -177,8 +203,6 @@ export async function runLearn(): Promise<number> {
 /**
  * Seed mínimo idempotente. Crea 1 project, 1 concept, 1 item y 1 session
  * hardcoded si no existen. Suficiente para que el FK de `attempts` no falle.
- *
- * INSERT OR IGNORE hace que re-correr `learn` sea barato y seguro.
  */
 function ensureSeed(container: AppContainer): void {
   const now = new Date().toISOString();

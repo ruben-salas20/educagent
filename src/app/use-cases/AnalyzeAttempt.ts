@@ -166,6 +166,9 @@ export async function analyzeAttempt(
       temperature: 0.0,
       // El JSON estructurado es muy corto; cap bajo para latency + costo.
       maxTokens: 200,
+      // Activa JSON mode si el provider lo soporta (Ollama: format:"json").
+      // Anthropic devuelve false en supportsJsonMode → este flag queda en false ahí.
+      jsonMode: deps.llm.capabilities().supportsJsonMode,
     },
   );
 

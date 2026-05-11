@@ -23,6 +23,12 @@ export interface LLMCompletionOptions {
   readonly tools?: ReadonlyArray<{ name: string; description: string; schema: object }>;
   /** Si el adapter soporta cacheo (Anthropic prompt caching, etc.), aplica. */
   readonly cacheable?: boolean;
+  /**
+   * Si true Y el provider lo soporta (capabilities.supportsJsonMode), pide al modelo
+   * que retorne JSON válido. Anthropic ignora este flag (no tiene JSON mode estricto);
+   * Ollama lo activa con `format: "json"`; OpenAI lo activa con `response_format`.
+   */
+  readonly jsonMode?: boolean;
 }
 
 export interface LLMCompletion {
