@@ -8,6 +8,7 @@
 // caller pueda mostrar "corré `educagent init`" sin acoplar a strings hardcoded.
 
 import type { IConfigStore } from '../ports/infra/IConfigStore.js';
+import type { ILLMProvider } from '../ports/llm/ILLMProvider.js';
 import { ok, err, type Result } from '../core/result/Result.js';
 import {
   buildContainer,
@@ -23,6 +24,12 @@ export type BootstrapError =
 export interface BootstrapOptions {
   /** Override del SQLite path. Útil para tests o para correr contra DB temporal. */
   readonly sqliteFilename?: string;
+  /**
+   * Proveedor LLM (BYOK) construido por el caller. Si es null o se omite,
+   * el container queda con `llm: null` y los comandos que requieran LLM
+   * deben rechazar la operación con mensaje claro.
+   */
+  readonly llm?: ILLMProvider | null;
 }
 
 /**
@@ -67,6 +74,7 @@ export async function bootstrap(
     const container = buildContainer({
       userConfig: readResult.value,
       sqliteFilename: options.sqliteFilename,
+      llm: options.llm,
     });
     return ok(container);
   } catch (e) {

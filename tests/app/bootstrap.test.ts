@@ -11,6 +11,11 @@ import type {
   ConfigStoreError,
 } from '../../src/ports/infra/IConfigStore.js';
 import { ok, err, type Result } from '../../src/core/result/Result.js';
+import type {
+  ILLMProvider,
+  LLMCompletion,
+  LLMError,
+} from '../../src/ports/llm/ILLMProvider.js';
 
 class StubConfigStore implements IConfigStore {
   constructor(
@@ -85,6 +90,45 @@ describe('bootstrap', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.kind).toBe('config_invalid');
+  });
+
+  it('container.llm queda null cuando no se pasa en options', async () => {
+    const store = new StubConfigStore(async () => ok(validConfig));
+    const result = await bootstrap(store, { sqliteFilename: ':memory:' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.llm).toBeNull();
+    result.value.db.close();
+  });
+
+  it('container.llm queda asignado cuando se pasa en options', async () => {
+    const fakeLLM: ILLMProvider = {
+      capabilities: () => ({
+        name: 'fake',
+        contextWindowTokens: 10_000,
+        supportsTools: false,
+        supportsStreaming: false,
+        supportsPromptCaching: false,
+        supportsJsonMode: false,
+        maxOutputTokens: 1024,
+        isLocal: true,
+      }),
+      complete: async (): Promise<Result<LLMCompletion, LLMError>> =>
+        ok({
+          text: 'ok',
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        }),
+    };
+    const store = new StubConfigStore(async () => ok(validConfig));
+    const result = await bootstrap(store, {
+      sqliteFilename: ':memory:',
+      llm: fakeLLM,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.llm).toBe(fakeLLM);
+    result.value.db.close();
   });
 
   it('propaga errores de buildContainer como bootstrap_failed', async () => {

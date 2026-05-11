@@ -15,6 +15,7 @@ import type { IMasteryStateRepository } from '../ports/persistence/IMasteryState
 import type { IScheduler } from '../ports/inference/IScheduler.js';
 import type { IClock } from '../ports/infra/IClock.js';
 import type { UserConfig } from '../ports/infra/IConfigStore.js';
+import type { ILLMProvider } from '../ports/llm/ILLMProvider.js';
 import {
   openConnection,
   type ConnectionConfig,
@@ -47,6 +48,12 @@ export interface AppContainer {
    * cuando todos los repos cubran el dominio, este campo se puede sacar.
    */
   readonly db: Database.Database;
+  /**
+   * Proveedor LLM inyectado por el caller (BYOK). `null` si el comando no
+   * necesita LLM o si el caller no configuró ninguno — los use cases que
+   * dependen del LLM deben verificar este campo antes de invocarlo.
+   */
+  readonly llm: ILLMProvider | null;
 }
 
 export interface BuildContainerConfig {
@@ -72,6 +79,12 @@ export interface BuildContainerConfig {
    * Útil para entornos donde WAL no aplica (tests, ramdisk, etc.).
    */
   readonly disableWAL?: boolean;
+  /**
+   * Proveedor LLM ya construido por el caller (composition root no instancia
+   * adapters de LLM porque el modelo/apiKey vienen del CLI/env). Si es null
+   * o se omite, el container queda con `llm: null`.
+   */
+  readonly llm?: ILLMProvider | null;
 }
 
 /**
@@ -137,6 +150,7 @@ export function buildContainer(config: BuildContainerConfig): AppContainer {
     scheduler: new Sm2Scheduler(),
     clock: new SystemClock(),
     userConfig: config.userConfig,
+    llm: config.llm ?? null,
   };
 }
 

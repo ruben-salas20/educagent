@@ -15,6 +15,12 @@ import { SqliteMasteryStateRepository } from '../../src/adapters/persistence/sql
 import { Sm2Scheduler } from '../../src/adapters/inference/Sm2Scheduler.js';
 import { SystemClock } from '../../src/adapters/infra/SystemClock.js';
 import type { UserConfig } from '../../src/ports/infra/IConfigStore.js';
+import type {
+  ILLMProvider,
+  LLMCompletion,
+  LLMError,
+} from '../../src/ports/llm/ILLMProvider.js';
+import { ok, type Result } from '../../src/core/result/Result.js';
 
 const dummyUserConfig: UserConfig = {
   schemaVersion: 1,
@@ -149,6 +155,62 @@ describe('buildContainer', () => {
       }
     } finally {
       rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('llm queda null por defecto cuando no se inyecta', () => {
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+    });
+    try {
+      expect(container.llm).toBeNull();
+    } finally {
+      container.db.close();
+    }
+  });
+
+  it('llm queda null cuando se pasa explícitamente null', () => {
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+      llm: null,
+    });
+    try {
+      expect(container.llm).toBeNull();
+    } finally {
+      container.db.close();
+    }
+  });
+
+  it('llm queda asignado cuando se inyecta un provider', () => {
+    const fakeLLM: ILLMProvider = {
+      capabilities: () => ({
+        name: 'fake',
+        contextWindowTokens: 10_000,
+        supportsTools: false,
+        supportsStreaming: false,
+        supportsPromptCaching: false,
+        supportsJsonMode: false,
+        maxOutputTokens: 1024,
+        isLocal: true,
+      }),
+      complete: async (): Promise<Result<LLMCompletion, LLMError>> =>
+        ok({
+          text: 'ok',
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        }),
+    };
+    const container = buildContainer({
+      userConfig: dummyUserConfig,
+      sqliteFilename: ':memory:',
+      llm: fakeLLM,
+    });
+    try {
+      expect(container.llm).toBe(fakeLLM);
+    } finally {
+      container.db.close();
     }
   });
 
