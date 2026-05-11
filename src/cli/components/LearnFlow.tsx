@@ -17,8 +17,22 @@ import { useEffect, useState } from 'react';
 
 type Step = 'prompt' | 'input' | 'processing' | 'feedback' | 'error';
 
+/** Detalle visible para debugging: outcome detectado por el LLM + latencia. */
+export interface LLMAnalysisDetail {
+  readonly outcome: string;       // 'correct' | 'partial' | 'incorrect' | 'skipped' | 'gave_up'
+  readonly errorType: string | null;
+  readonly latencyMs: number;
+  readonly providerName: string;  // 'ollama' | 'anthropic'
+  readonly model: string;
+}
+
 export type LearnFlowSubmitResult =
-  | { readonly ok: true; readonly feedbackText: string }
+  | {
+      readonly ok: true;
+      readonly feedbackText: string;
+      /** Opcional — si se pasa, el LearnFlow lo renderiza para debugging. */
+      readonly analysis?: LLMAnalysisDetail;
+    }
   | { readonly ok: false; readonly error: string };
 
 export interface LearnFlowProps {
@@ -29,7 +43,12 @@ export interface LearnFlowProps {
 }
 
 const PROMPT_DURATION_MS = 800;
-const EXIT_DELAY_MS = 2500;
+const EXIT_DELAY_MS = 10_000;  // 10s — suficiente para leer feedback + análisis detallado
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
 
 export function LearnFlow({
   promptText,
@@ -40,6 +59,7 @@ export function LearnFlow({
   const [step, setStep] = useState<Step>('prompt');
   const [response, setResponse] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
+  const [analysis, setAnalysis] = useState<LLMAnalysisDetail | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Auto-avance prompt → input para que el usuario vea la pregunta antes del cursor.
@@ -64,6 +84,7 @@ export function LearnFlow({
     const result = await onSubmit(value);
     if (result.ok) {
       setFeedbackText(result.feedbackText);
+      setAnalysis(result.analysis ?? null);
       setStep('feedback');
     } else {
       setErrorMsg(result.error);
@@ -111,13 +132,38 @@ export function LearnFlow({
 
       {step === 'feedback' && (
         <Box flexDirection="column">
+          {analysis && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Box>
+                <Text color="cyan">Análisis del LLM</Text>
+                <Text dimColor>
+                  {' '}
+                  ({analysis.providerName}/{analysis.model}, {formatLatency(analysis.latencyMs)})
+                </Text>
+              </Box>
+              <Box>
+                <Text dimColor>  outcome:   </Text>
+                <Text color={analysis.outcome === 'correct' ? 'green' : 'yellow'}>
+                  {analysis.outcome}
+                </Text>
+              </Box>
+              <Box>
+                <Text dimColor>  errorType: </Text>
+                <Text>{analysis.errorType ?? 'null'}</Text>
+              </Box>
+            </Box>
+          )}
+          <Box marginBottom={1}>
+            <Text color="cyan">Feedback (política P1):</Text>
+          </Box>
           <Box marginBottom={1}>
             <Text>{feedbackText}</Text>
           </Box>
           <Text dimColor>
-            Esto es un walking skeleton — `learn` real va a tener loop, items
-            múltiples y feedback generado por LLM.
+            P1 retorna frases de matrices pedagógicas (Hattie &amp; Timperley), NO
+            generadas por LLM. El LLM solo clasifica outcome+errorType.
           </Text>
+          <Text dimColor>Saliendo en 10s…</Text>
         </Box>
       )}
 

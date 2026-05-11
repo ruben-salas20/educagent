@@ -168,6 +168,8 @@ export async function runLearn(): Promise<number> {
       return { ok: false, error: 'LLM no disponible.' };
     }
 
+    const llmCapabilities = container.llm.capabilities();
+    const analyzeStart = Date.now();
     const analysis = await analyzeAttempt(
       {
         itemPrompt: SEED_ITEM_PROMPT,
@@ -177,11 +179,18 @@ export async function runLearn(): Promise<number> {
       },
       { llm: container.llm },
     );
+    const analyzeLatencyMs = Date.now() - analyzeStart;
 
     if (!analysis.ok) {
       return {
         ok: false,
-        error: `Análisis fallido: ${analysis.error.kind}`,
+        error: `Análisis fallido (${analysis.error.kind} tras ${analyzeLatencyMs}ms): ${
+          'cause' in analysis.error
+            ? typeof analysis.error.cause === 'string'
+              ? analysis.error.cause
+              : JSON.stringify(analysis.error.cause)
+            : ''
+        }`,
       };
     }
 
@@ -222,7 +231,19 @@ export async function runLearn(): Promise<number> {
     }
 
     const feedbackText = result.value.feedbackDecision?.text ?? 'Registrado.';
-    return { ok: true, feedbackText };
+    return {
+      ok: true,
+      feedbackText,
+      analysis: {
+        outcome,
+        errorType,
+        latencyMs: analyzeLatencyMs,
+        providerName: llmCapabilities.name,
+        model: llmCapabilities.name === 'ollama'
+          ? (process.env.OLLAMA_MODEL ?? userConfig.llm.model ?? 'unknown')
+          : (process.env.ANTHROPIC_MODEL ?? userConfig.llm.model ?? 'unknown'),
+      },
+    };
   };
 
   try {

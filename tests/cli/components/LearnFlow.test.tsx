@@ -95,7 +95,7 @@ describe('LearnFlow — Ink component', () => {
     stdin.write(ENTER);
     await delay(80);
     expect(lastFrame()).toContain('Excelente definición.');
-    expect(lastFrame()).toContain('walking skeleton');
+    expect(lastFrame()).toContain('Hattie');
   });
 
   it('muestra el step error cuando onSubmit retorna ok:false', async () => {
@@ -131,6 +131,6 @@ describe('LearnFlow — Ink component', () => {
     await delay(2700);
     // Si autoExit hubiese disparado, el frame estaría vacío o el proceso muerto.
     expect(lastFrame()).toContain('ok');
-    expect(lastFrame()).toContain('walking skeleton');
+    expect(lastFrame()).toContain('Hattie');
   });
 });
