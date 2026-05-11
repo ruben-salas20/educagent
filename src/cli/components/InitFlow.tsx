@@ -25,12 +25,20 @@ import {
 } from '../lib/ollamaCatalog.js';
 
 /**
- * Wrapper sobre SelectInput que demora el mount real ~80ms.
+ * Wrapper sobre SelectInput que demora el mount real ~250ms.
  * Razón: ink-select-input v6 pierde los primeros keypresses cuando se monta
- * inmediatamente después de una transición de step asincrónica (el setup de raw
- * mode de stdin no está listo). Con un delay corto, raw mode se estabiliza
- * antes de que el SelectInput intente subscribirse al stdin.
- * Imperceptible visualmente para el usuario.
+ * inmediatamente después de una transición de step asincrónica. El setup de
+ * raw mode de stdin + focus context no están listos, y los primeros keypresses
+ * (especialmente las flechas) se descartan. El primer Enter eventualmente
+ * "despierta" el componente.
+ *
+ * 250ms parece overkill pero es lo mínimo confiable observado en TTYs Windows
+ * + PowerShell + ink-select-input v6. Por debajo (80-150ms) el problema
+ * reaparece intermitentemente.
+ *
+ * El placeholder "Cargando opciones…" fuerza a Ink a renderizar contenido
+ * visible (no espacio en blanco) durante el delay — esto activa el ciclo de
+ * raw mode antes de que aparezca el SelectInput real.
  */
 function StableSelectInput<V>(props: {
   items: ReadonlyArray<{ key?: string; label: string; value: V }>;
@@ -38,11 +46,15 @@ function StableSelectInput<V>(props: {
 }): React.JSX.Element {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setReady(true), 80);
+    const t = setTimeout(() => setReady(true), 250);
     return () => clearTimeout(t);
   }, []);
   if (!ready) {
-    return <Text dimColor> </Text>;
+    return (
+      <Box>
+        <Text dimColor>Cargando opciones…</Text>
+      </Box>
+    );
   }
   return <SelectInput items={[...props.items]} onSelect={props.onSelect} />;
 }
