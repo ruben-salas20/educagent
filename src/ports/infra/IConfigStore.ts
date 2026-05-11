@@ -2,8 +2,25 @@
 import type { Result } from '../../core/result/Result.js';
 
 /**
+ * Provider LLM seleccionado por el usuario.
+ * - 'ollama'    → Local. Requiere instalación de Ollama y un modelo descargado.
+ * - 'anthropic' → API remota. Requiere ANTHROPIC_API_KEY en env var (NUNCA en config).
+ * - 'none'      → Sin LLM real. El comando learn imprime hint y exit 1.
+ */
+export interface LLMConfig {
+  readonly provider: 'ollama' | 'anthropic' | 'none';
+  /** Nombre del modelo. null si provider='none'. */
+  readonly model: string | null;
+  /** URL Ollama. Solo aplica si provider='ollama'. Default 'http://localhost:11434'. */
+  readonly ollamaUrl?: string;
+}
+
+/**
  * Configuración global del usuario, persistida en ~/.educagent/config.toml.
  * Schema versionado para permitir migraciones futuras sin romper instalaciones viejas.
+ *
+ * IMPORTANTE: las API keys NUNCA viven acá. Siempre en env var (evita leaks por
+ * backups, screen sharing, commits accidentales).
  */
 export interface UserConfig {
   readonly schemaVersion: number;
@@ -12,9 +29,13 @@ export interface UserConfig {
     readonly agentLanguage: 'auto' | 'es' | 'en';
     readonly retentionLevel: 'strict' | 'standard' | 'full';
   };
-  /** Para futuros campos sin breaking changes (telemetría, providers, etc.). */
+  /** NUEVO en v2. Selección del LLM provider + modelo. */
+  readonly llm: LLMConfig;
+  /** Para futuros campos sin breaking changes (telemetría, etc.). */
   readonly extras?: Readonly<Record<string, unknown>>;
 }
+
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export type ConfigStoreError =
   | { kind: 'not_found'; path: string }

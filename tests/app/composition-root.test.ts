@@ -23,12 +23,13 @@ import type {
 import { ok, type Result } from '../../src/core/result/Result.js';
 
 const dummyUserConfig: UserConfig = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   profile: {
     domain: 'programming',
     agentLanguage: 'auto',
     retentionLevel: 'strict',
   },
+  llm: { provider: 'none', model: null },
 };
 
 describe('buildContainer', () => {
@@ -126,8 +127,9 @@ describe('buildContainer', () => {
 
   it('preserva userConfig en el container (referencia exacta)', () => {
     const customConfig: UserConfig = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       profile: { domain: 'math', agentLanguage: 'es', retentionLevel: 'full' },
+      llm: { provider: 'none', model: null },
     };
     const container = buildContainer({
       userConfig: customConfig,

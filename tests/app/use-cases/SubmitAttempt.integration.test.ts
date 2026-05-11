@@ -78,12 +78,13 @@ describe('SubmitAttempt — integration full-stack contra SQLite :memory:', () =
   beforeEach(() => {
     container = buildContainer({
       userConfig: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         profile: {
           domain: 'programming',
           agentLanguage: 'auto',
           retentionLevel: 'strict',
         },
+        llm: { provider: 'none', model: null },
       },
       sqliteFilename: ':memory:',
     });

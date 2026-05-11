@@ -15,7 +15,12 @@ export default defineConfig({
       reporter: ['text', 'html', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: [
-        'src/cli/**',
+        // CLI: excluimos componentes Ink y entry-points (no-headless),
+        // pero medimos `cli/lib/**` que es lógica pura testeable.
+        'src/cli/bin.ts',
+        'src/cli/help.ts',
+        'src/cli/commands/**',
+        'src/cli/components/**',
         'src/**/index.ts',
         // Entities y value-objects son type-only: sin runtime code, coverage 0% es esperable
         'src/core/entities/**',

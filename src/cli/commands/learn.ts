@@ -2,15 +2,17 @@
 // Comando `educagent learn` — walking skeleton MVP one-shot.
 //
 // Flow:
-//   1. Factory selector: EDUCAGENT_LLM_PROVIDER (default: ollama).
-//      - 'ollama' → OllamaLLMProvider (local, no requiere API key).
-//      - 'anthropic' → AnthropicLLMProvider (requiere ANTHROPIC_API_KEY).
-//   2. Bootstrappear container con el LLM inyectado.
-//   3. Seed mínimo idempotente (project/concept/item/session) para FKs.
-//   4. Render LearnFlow → usuario responde la pregunta hardcoded.
-//   5. analyzeAttempt() invoca al LLM para clasificar outcome + errorType.
-//   6. submitAttempt() persiste Attempt + actualiza MasteryState + P1 feedback.
-//   7. Render del feedbackDecision (o "Registrado." si no hay).
+//   1. Leer config.toml. Si no existe → hint a correr `educagent init`.
+//   2. Factory selector: lee `llm.provider` + `llm.model` del config.
+//      Env vars (OLLAMA_MODEL, ANTHROPIC_MODEL, OLLAMA_URL, EDUCAGENT_LLM_PROVIDER)
+//      mantienen prioridad como override de power-user (documentadas en help).
+//      Si provider='none' → hint a re-correr `educagent init` y exit 1.
+//   3. Bootstrappear container con el LLM inyectado.
+//   4. Seed mínimo idempotente (project/concept/item/session) para FKs.
+//   5. Render LearnFlow → usuario responde la pregunta hardcoded.
+//   6. analyzeAttempt() invoca al LLM para clasificar outcome + errorType.
+//   7. submitAttempt() persiste Attempt + actualiza MasteryState + P1 feedback.
+//   8. Render del feedbackDecision (o "Registrado." si no hay).
 
 import React from 'react';
 import { render } from 'ink';
@@ -24,6 +26,7 @@ import { LearnFlow, type LearnFlowSubmitResult } from '../components/LearnFlow.j
 import type { AppContainer } from '../../app/composition-root.js';
 import type { Attempt } from '../../core/entities/Attempt.js';
 import type { ILLMProvider } from '../../ports/llm/ILLMProvider.js';
+import type { UserConfig } from '../../ports/infra/IConfigStore.js';
 
 // IDs hardcoded para el seed mínimo del MVP.
 const SEED_PROJECT_ID = 'prj_default';
@@ -36,8 +39,6 @@ const SEED_ITEM_PROMPT =
 const SEED_CONCEPT_NAME = 'Variable en programación';
 const ASSUMED_LATENCY_MS = 30_000;
 
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_OLLAMA_MODEL = 'gemma4:latest';
 const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
 
 type ProviderBuildResult =
@@ -45,48 +46,77 @@ type ProviderBuildResult =
   | { ok: false; error: string };
 
 /**
- * Factory selector. Lee env vars y devuelve el LLMProvider configurado.
- * Default: Ollama (local-first, sin API key requerida).
+ * Factory selector basado en config + env overrides.
+ *
+ * Reglas:
+ * - `EDUCAGENT_LLM_PROVIDER` env override > config.llm.provider.
+ * - `OLLAMA_MODEL` env override > config.llm.model (cuando provider=ollama).
+ * - `ANTHROPIC_MODEL` env override > config.llm.model (cuando provider=anthropic).
+ * - `OLLAMA_URL` env override > config.llm.ollamaUrl > DEFAULT_OLLAMA_URL.
+ * - `ANTHROPIC_API_KEY` SIEMPRE viene del env (NUNCA del config — decisión de seguridad).
+ * - provider='none' → bloqueamos `learn` con hint a re-correr `init`.
  */
-function buildLLMProvider(): ProviderBuildResult {
-  const choice = (process.env.EDUCAGENT_LLM_PROVIDER ?? 'ollama').toLowerCase();
+function buildLLMProvider(userConfig: UserConfig): ProviderBuildResult {
+  const llmConfig = userConfig.llm;
+  const providerOverride = process.env.EDUCAGENT_LLM_PROVIDER?.toLowerCase();
+  const provider = providerOverride ?? llmConfig.provider;
 
-  if (choice === 'ollama') {
-    const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
-    const baseUrl = process.env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL;
+  if (provider === 'none') {
+    return {
+      ok: false,
+      error: [
+        'Sin LLM configurado. EducAgent necesita un LLM para analizar tus respuestas.',
+        '',
+        'Corré `educagent init` y elegí Ollama (local) o Anthropic (remoto).',
+      ].join('\n'),
+    };
+  }
+
+  if (provider === 'ollama') {
+    const model = process.env.OLLAMA_MODEL ?? llmConfig.model;
+    if (!model || model.trim() === '') {
+      return {
+        ok: false,
+        error: 'Provider Ollama configurado pero sin modelo. Corré `educagent init` de nuevo.',
+      };
+    }
+    const baseUrl = process.env.OLLAMA_URL ?? llmConfig.ollamaUrl ?? DEFAULT_OLLAMA_URL;
     return {
       ok: true,
       provider: new OllamaLLMProvider({ model, baseUrl }),
     };
   }
 
-  if (choice === 'anthropic') {
+  if (provider === 'anthropic') {
+    const model = process.env.ANTHROPIC_MODEL ?? llmConfig.model;
+    if (!model || model.trim() === '') {
+      return {
+        ok: false,
+        error: 'Provider Anthropic configurado pero sin modelo. Corré `educagent init` de nuevo.',
+      };
+    }
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey || apiKey.trim() === '') {
       return {
         ok: false,
         error: [
-          'EDUCAGENT_LLM_PROVIDER=anthropic pero no se encontró ANTHROPIC_API_KEY.',
+          'Provider Anthropic configurado, pero no se encontró ANTHROPIC_API_KEY en el environment.',
           '',
           'Configurala así:',
-          '  PowerShell:  $env:ANTHROPIC_API_KEY = "tu-key"',
-          '  Bash:        export ANTHROPIC_API_KEY="tu-key"',
+          '  PowerShell:  $env:ANTHROPIC_API_KEY = "sk-ant-..."',
+          '  Bash:        export ANTHROPIC_API_KEY="sk-ant-..."',
           '',
-          `Modelo opcional via ANTHROPIC_MODEL (default: ${DEFAULT_ANTHROPIC_MODEL}).`,
+          'Por seguridad, las API keys SIEMPRE viven en el env, NUNCA en el config.toml.',
         ].join('\n'),
       };
     }
-    const model = process.env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
     return {
       ok: true,
       provider: new AnthropicLLMProvider({ apiKey, model }),
     };
   }
 
-  return {
-    ok: false,
-    error: `EDUCAGENT_LLM_PROVIDER='${choice}' no es válido. Opciones: ollama, anthropic.`,
-  };
+  return { ok: false, error: `Provider desconocido en config: '${provider}'.` };
 }
 
 /**
@@ -94,16 +124,29 @@ function buildLLMProvider(): ProviderBuildResult {
  * @returns exit code (0 ok, 1 fallo de bootstrap o configuración inválida)
  */
 export async function runLearn(): Promise<number> {
-  // 1. Factory: armar el LLMProvider según env vars.
-  const providerResult = buildLLMProvider();
+  // 1. Leer config — necesitamos saber qué provider eligió el usuario.
+  const store = new TomlConfigStore();
+  const configResult = await store.read();
+  if (!configResult.ok) {
+    if (configResult.error.kind === 'not_found') {
+      console.error('No se encontró el config de EducAgent.');
+      console.error('Corré `educagent init` primero para configurar tu instalación.');
+      return 1;
+    }
+    console.error('Error al leer el config:', JSON.stringify(configResult.error));
+    return 1;
+  }
+  const userConfig = configResult.value;
+
+  // 2. Factory: armar el LLMProvider según config + env overrides.
+  const providerResult = buildLLMProvider(userConfig);
   if (!providerResult.ok) {
     console.error('Error:', providerResult.error);
     return 1;
   }
   const llm = providerResult.provider;
 
-  // 2. Bootstrap del container con el LLM inyectado.
-  const store = new TomlConfigStore();
+  // 3. Bootstrap del container con el LLM inyectado.
   const bootResult = await bootstrap(store, { llm });
 
   if (!bootResult.ok) {

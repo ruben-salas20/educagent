@@ -28,6 +28,8 @@ export async function runInit(): Promise<number> {
     console.log(`Dominio:     ${existing.value.profile.domain}`);
     console.log(`Idioma:      ${existing.value.profile.agentLanguage}`);
     console.log(`Privacidad:  ${existing.value.profile.retentionLevel}`);
+    console.log(`Provider:    ${existing.value.llm.provider}`);
+    console.log(`Modelo:      ${existing.value.llm.model ?? '—'}`);
     console.log('');
     console.log('Para reconfigurar, borrá el archivo y volvé a correr `educagent init`.');
     return 0;

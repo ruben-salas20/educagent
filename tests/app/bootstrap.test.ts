@@ -34,12 +34,13 @@ class StubConfigStore implements IConfigStore {
 }
 
 const validConfig: UserConfig = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   profile: {
     domain: 'programming',
     agentLanguage: 'auto',
     retentionLevel: 'strict',
   },
+  llm: { provider: 'none', model: null },
 };
 
 describe('bootstrap', () => {

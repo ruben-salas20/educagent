@@ -1,23 +1,48 @@
 // src/cli/components/InitFlow.tsx
-// Flow interactivo del comando `educagent init`. 6 pantallas:
-// welcome → domain → language → retention → summary → done|error.
+// Flow interactivo del comando `educagent init`. Steps:
+// welcome → domain → language → retention → llm_provider →
+//   (ollama:  llm_ollama_loading → llm_ollama_model | llm_ollama_error)
+//   (anthropic: llm_anthropic_model)
+//   (none:    salta directo a summary)
+// → summary → writing → done|error.
 //
 // Decisiones:
-// - useApp().exit() en vez de process.exit() — API correcta de Ink, deja
-//   que `render(...).waitUntilExit()` resuelva limpio.
+// - useApp().exit() — API correcta de Ink, deja que waitUntilExit() resuelva limpio.
 // - El submit async vive afuera (prop onSubmit) — el componente no toca disco.
-//   Esto lo deja testeable sin tmpdir.
+// - fetchCatalog es prop opcional para inyectar mock en tests (default real).
+// - API keys NUNCA se piden en la TUI. Solo provider + model. Avisamos al usuario
+//   que ANTHROPIC_API_KEY tiene que existir en su env antes de correr `learn`.
 
 import { Box, Text, useApp } from 'ink';
 import SelectInput from 'ink-select-input';
 import { useEffect, useState } from 'react';
-import type { UserConfig } from '../../ports/infra/IConfigStore.js';
+import type { UserConfig, LLMConfig } from '../../ports/infra/IConfigStore.js';
+import {
+  fetchOllamaCatalog,
+  formatBytes,
+  type OllamaModelInfo,
+  type OllamaCatalogError,
+} from '../lib/ollamaCatalog.js';
 
-type Step = 'welcome' | 'domain' | 'language' | 'retention' | 'summary' | 'writing' | 'done' | 'error';
+type Step =
+  | 'welcome'
+  | 'domain'
+  | 'language'
+  | 'retention'
+  | 'llm_provider'
+  | 'llm_ollama_loading'
+  | 'llm_ollama_model'
+  | 'llm_ollama_error'
+  | 'llm_anthropic_model'
+  | 'summary'
+  | 'writing'
+  | 'done'
+  | 'error';
 
 type Domain = UserConfig['profile']['domain'];
 type AgentLanguage = UserConfig['profile']['agentLanguage'];
 type RetentionLevel = UserConfig['profile']['retentionLevel'];
+type Provider = LLMConfig['provider'];
 
 export interface InitFlowSubmitResult {
   ok: boolean;
@@ -28,6 +53,8 @@ export interface InitFlowSubmitResult {
 export interface InitFlowProps {
   onSubmit: (config: UserConfig) => Promise<InitFlowSubmitResult>;
   configPath: string;
+  /** DI para tests. Si no se pasa, usa la implementación real. */
+  fetchCatalog?: typeof fetchOllamaCatalog;
 }
 
 interface Item<V> {
@@ -56,6 +83,29 @@ const RETENTION_ITEMS: ReadonlyArray<Item<RetentionLevel>> = [
   { label: 'full — sin limpieza automática', value: 'full' },
 ];
 
+const PROVIDER_ITEMS: ReadonlyArray<Item<Provider>> = [
+  { label: 'Ollama — local, gratis (requiere instalación)', value: 'ollama' },
+  { label: 'Anthropic — API remota (requiere ANTHROPIC_API_KEY)', value: 'anthropic' },
+  { label: 'Sin LLM — placeholder, no analiza respuestas', value: 'none' },
+];
+
+// IDs reales confirmados con Context7 (Mayo 2026):
+// - claude-sonnet-4-5-20250929 → balance calidad/costo (default).
+// - claude-haiku-4-5-20251001  → rápido y barato.
+// - claude-opus-4-5-20251101   → mejor calidad, más caro.
+const ANTHROPIC_MODEL_ITEMS: ReadonlyArray<Item<string>> = [
+  { label: 'Sonnet 4.5 — balance calidad/costo (recomendado)', value: 'claude-sonnet-4-5-20250929' },
+  { label: 'Haiku 4.5 — rápido, económico', value: 'claude-haiku-4-5-20251001' },
+  { label: 'Opus 4.5 — máxima calidad, más caro', value: 'claude-opus-4-5-20251101' },
+];
+
+const OLLAMA_ERROR_ITEMS: ReadonlyArray<Item<'retry' | 'switch_anthropic' | 'switch_none' | 'cancel'>> = [
+  { label: 'Reintentar', value: 'retry' },
+  { label: 'Cambiar a Anthropic', value: 'switch_anthropic' },
+  { label: 'Continuar sin LLM (placeholder)', value: 'switch_none' },
+  { label: 'Cancelar init', value: 'cancel' },
+];
+
 const CONFIRM_ITEMS: ReadonlyArray<Item<'confirm' | 'cancel'>> = [
   { label: 'Crear configuración', value: 'confirm' },
   { label: 'Cancelar', value: 'cancel' },
@@ -70,13 +120,52 @@ function languageLabel(l: AgentLanguage): string {
 function retentionLabel(r: RetentionLevel): string {
   return RETENTION_ITEMS.find((i) => i.value === r)?.label ?? r;
 }
+function providerLabel(p: Provider): string {
+  return PROVIDER_ITEMS.find((i) => i.value === p)?.label ?? p;
+}
 
-export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Element {
+function ollamaErrorHint(error: OllamaCatalogError): { title: string; body: string[] } {
+  if (error.kind === 'not_running') {
+    return {
+      title: `No se pudo conectar a Ollama en ${error.url}.`,
+      body: [
+        '¿Ollama está corriendo? Comando: `ollama serve`',
+        'Instalación: https://ollama.com/',
+        `Detalle: ${error.cause}`,
+      ],
+    };
+  }
+  if (error.kind === 'empty_catalog') {
+    return {
+      title: `Ollama corre en ${error.url} pero no hay modelos descargados.`,
+      body: [
+        'Descargá uno con:',
+        '  ollama pull qwen2.5:7b   (recomendado)',
+        '  ollama pull gemma2:9b',
+        'Después volvé a correr `educagent init`.',
+      ],
+    };
+  }
+  return {
+    title: `Ollama respondió algo inesperado (${error.status ?? '?'}).`,
+    body: [`Detalle: ${error.cause}`, `URL: ${error.url}`],
+  };
+}
+
+export function InitFlow({
+  onSubmit,
+  configPath,
+  fetchCatalog = fetchOllamaCatalog,
+}: InitFlowProps): React.JSX.Element {
   const { exit } = useApp();
   const [step, setStep] = useState<Step>('welcome');
   const [domain, setDomain] = useState<Domain>('programming');
   const [agentLanguage, setAgentLanguage] = useState<AgentLanguage>('auto');
   const [retentionLevel, setRetentionLevel] = useState<RetentionLevel>('strict');
+  const [provider, setProvider] = useState<Provider>('none');
+  const [model, setModel] = useState<string | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<ReadonlyArray<OllamaModelInfo>>([]);
+  const [ollamaError, setOllamaError] = useState<OllamaCatalogError | null>(null);
   const [resultPath, setResultPath] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
@@ -88,8 +177,28 @@ export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Ele
     return () => clearTimeout(t);
   }, [step]);
 
-  // Cuando llegamos a 'done' o 'error', exit gracefully tras un breve delay
-  // para que el usuario alcance a leer el mensaje final.
+  // Cuando entramos en llm_ollama_loading, disparamos el fetch al catalog.
+  useEffect(() => {
+    if (step !== 'llm_ollama_loading') return;
+    let cancelled = false;
+    void (async () => {
+      const result = await fetchCatalog();
+      if (cancelled) return;
+      if (result.ok) {
+        setOllamaModels(result.value);
+        setOllamaError(null);
+        setStep('llm_ollama_model');
+      } else {
+        setOllamaError(result.error);
+        setStep('llm_ollama_error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, fetchCatalog]);
+
+  // Cuando llegamos a 'done' o 'error', exit gracefully tras un breve delay.
   useEffect(() => {
     if (step !== 'done' && step !== 'error') return;
     const t = setTimeout(() => {
@@ -105,9 +214,12 @@ export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Ele
       return;
     }
     setStep('writing');
+    const llm: LLMConfig =
+      provider === 'none' ? { provider: 'none', model: null } : { provider, model };
     const result = await onSubmit({
-      schemaVersion: 1,
+      schemaVersion: 2,
       profile: { domain, agentLanguage, retentionLevel },
+      llm,
     });
     if (result.ok) {
       setResultPath(result.path ?? configPath);
@@ -181,6 +293,128 @@ export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Ele
           items={[...RETENTION_ITEMS]}
           onSelect={(item) => {
             setRetentionLevel(item.value);
+            setStep('llm_provider');
+          }}
+        />
+      </Box>
+    );
+  }
+
+  if (step === 'llm_provider') {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Box marginBottom={1}>
+          <Text bold>¿Qué LLM querés usar para analizar tus respuestas?</Text>
+        </Box>
+        <Box marginBottom={1}>
+          <Text dimColor>
+            Las API keys NUNCA se guardan en el config. Viven en variables de entorno.
+          </Text>
+        </Box>
+        <SelectInput
+          items={[...PROVIDER_ITEMS]}
+          onSelect={(item) => {
+            setProvider(item.value);
+            if (item.value === 'none') {
+              setModel(null);
+              setStep('summary');
+            } else if (item.value === 'ollama') {
+              setStep('llm_ollama_loading');
+            } else {
+              setStep('llm_anthropic_model');
+            }
+          }}
+        />
+      </Box>
+    );
+  }
+
+  if (step === 'llm_ollama_loading') {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text>Buscando modelos Ollama…</Text>
+        <Box marginTop={1}>
+          <Text dimColor>Consultando http://localhost:11434/api/tags</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (step === 'llm_ollama_model') {
+    const items: Array<Item<string>> = ollamaModels.map((m) => ({
+      label: `${m.name} (${formatBytes(m.sizeBytes)})`,
+      value: m.name,
+    }));
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Box marginBottom={1}>
+          <Text bold>Elegí el modelo Ollama</Text>
+        </Box>
+        <SelectInput
+          items={items}
+          onSelect={(item) => {
+            setModel(item.value);
+            setStep('summary');
+          }}
+        />
+      </Box>
+    );
+  }
+
+  if (step === 'llm_ollama_error' && ollamaError) {
+    const hint = ollamaErrorHint(ollamaError);
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Box marginBottom={1}>
+          <Text bold color="yellow">
+            {hint.title}
+          </Text>
+        </Box>
+        {hint.body.map((line, idx) => (
+          <Text key={idx} dimColor>
+            {line}
+          </Text>
+        ))}
+        <Box marginTop={1}>
+          <SelectInput
+            items={[...OLLAMA_ERROR_ITEMS]}
+            onSelect={(item) => {
+              if (item.value === 'retry') {
+                setStep('llm_ollama_loading');
+              } else if (item.value === 'switch_anthropic') {
+                setProvider('anthropic');
+                setStep('llm_anthropic_model');
+              } else if (item.value === 'switch_none') {
+                setProvider('none');
+                setModel(null);
+                setStep('summary');
+              } else {
+                setErrorMsg('Cancelado por el usuario.');
+                setStep('error');
+              }
+            }}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  if (step === 'llm_anthropic_model') {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Box marginBottom={1}>
+          <Text bold>Elegí el modelo Anthropic</Text>
+        </Box>
+        <Box marginBottom={1}>
+          <Text dimColor>
+            Asegurate de tener `ANTHROPIC_API_KEY` en tu environment cuando corras
+            `educagent learn`.
+          </Text>
+        </Box>
+        <SelectInput
+          items={[...ANTHROPIC_MODEL_ITEMS]}
+          onSelect={(item) => {
+            setModel(item.value);
             setStep('summary');
           }}
         />
@@ -202,6 +436,12 @@ export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Ele
         </Text>
         <Text>
           <Text color="cyan">Privacidad:</Text> {retentionLabel(retentionLevel)}
+        </Text>
+        <Text>
+          <Text color="cyan">Provider:</Text> {providerLabel(provider)}
+        </Text>
+        <Text>
+          <Text color="cyan">Modelo:</Text> {model ?? '—'}
         </Text>
         <Box marginTop={1}>
           <Text dimColor>Se va a crear: {configPath}</Text>
@@ -231,7 +471,7 @@ export function InitFlow({ onSubmit, configPath }: InitFlowProps): React.JSX.Ele
         </Box>
         <Text>Archivo: {resultPath}</Text>
         <Box marginTop={1}>
-          <Text dimColor>Siguiente paso: `educagent learn` (en construcción).</Text>
+          <Text dimColor>Siguiente paso: `educagent learn`.</Text>
         </Box>
       </Box>
     );
